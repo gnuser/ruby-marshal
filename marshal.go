@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"fmt"
 )
 
 const (
@@ -39,34 +40,34 @@ type Decoder struct {
 	symbols []string
 }
 
-func (d *Decoder) unmarshal() interface{} {
+func (d *Decoder) unmarshal() (result interface{}) {
 	typ, _ := d.r.ReadByte()
-
+	// fmt.Printf("type : %x, ", typ)
 	switch typ {
 	case NIL_SIGN: // 0 - nil
-		return nil
+		result = nil
 	case TRUE_SIGN: // T - true
-		return true
+		result = true
 	case FALSE_SIGN: // F - false
-		return false
+		result = false
 	case FIXNUM_SIGN: // i - integer
-		return d.parseInt()
+		result = d.parseInt()
 	case RAWSTRING_SIGN: // " - string
-		return d.parseString()
+		result = d.parseString()
 	case SYMBOL_SIGN: // : - symbol
-		return d.parseSymbol()
+		result = d.parseSymbol()
 	case SYMBOL_LINK_SIGN: // ; - symbol symlink
-		return d.parseSymLink()
+		result = d.parseSymLink()
 	case OBJECT_LINK_SIGN: // @ - object link
 		panic("not supported.")
 	case IVAR_SIGN: // I - IVAR (encoded string or regexp)
-		return d.parseIvar()
+		result = d.parseIvar()
 	case ARRAY_SIGN: // [ - array
-		return d.parseArray()
+		result = d.parseArray()
 	case OBJECT_SIGN: // o - object
 		panic("not supported.")
 	case HASH_SIGN: // { - hash
-		return d.parseHash()
+		result = d.parseHash()
 	case BIGNUM_SIGN: // l - bignum
 		panic("not supported.")
 	case REGEXP_SIGN: // / - regexp
@@ -76,9 +77,12 @@ func (d *Decoder) unmarshal() interface{} {
 	case MODULE_SIGN: // m -module
 		panic("not supported.")
 	default:
-		return nil
+		result = nil
 	}
+	// fmt.Printf("result: %v, %x \n", result, result)
+	return
 }
+
 
 func (d *Decoder) parseInt() int {
 	var result int
@@ -278,6 +282,7 @@ func (e *Encoder) marshal(v interface{}) error {
 		typ = typ.Elem()
 	}
 
+	// fmt.Printf("typ: %v\n", typ)
 	switch typ.Kind() {
 	case reflect.Bool:
 		return e.encBool(val.Bool())
@@ -285,13 +290,17 @@ func (e *Encoder) marshal(v interface{}) error {
 		e.w.WriteByte(FIXNUM_SIGN)
 		return e.encInt(int(val.Int()))
 	case reflect.String:
-		e.w.WriteByte(IVAR_SIGN)
 		return e.encString(val.String())
+	case reflect.Slice:
+		return e.encSlice(v)
+	case reflect.Map:
+		return e.encMap(v)
 	}
 	return nil
 }
 
 func (e *Encoder) encBool(val bool) error {
+	// fmt.Printf("enc bool , %v, treu: %x, false: %x\n", val, TRUE_SIGN, FALSE_SIGN)
 	if val {
 		return e.w.WriteByte(TRUE_SIGN)
 	}
@@ -354,6 +363,7 @@ func (e *Encoder) _encRawString(str string) error {
 }
 
 func (e *Encoder) encString(str string) error {
+	// fmt.Printf("enc string :%v, %x\n", str, str)
 	// | I | " | RawString( string ) | FixNum( 1 ) | Symbol( E ) | True |
 	if _, err := e.w.Write([]byte{IVAR_SIGN, RAWSTRING_SIGN}); err != nil {
 		return err
@@ -391,6 +401,33 @@ func (e *Encoder) _encSymbol(str string) error {
 	return err
 }
 
-func (e *Encoder) _encObject() error {
+func (e *Encoder) encSlice(arr interface{}) error {
+	// fmt.Println("enc slice")
+	e.w.WriteByte(ARRAY_SIGN)
+	a := arr.([]interface{})
+	e.encInt(len(a))
+	for _, item := range a {
+		err := e.marshal(item)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Encoder) encMap(v interface{}) error {
+	m := v.(map[string]interface{})
+	e.w.WriteByte(HASH_SIGN)
+	e.encInt(len(m))
+	for key, value := range m {
+		err := e.marshal(key)
+		if err != nil {
+			return err
+		}
+		err = e.marshal(value)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
